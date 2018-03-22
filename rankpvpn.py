@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 
+# Copyright (C) 2018 George Litos
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
 import argparse
 import calendar
 import datetime
@@ -20,10 +36,11 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from bs4 import BeautifulSoup
 
 
-# Generic Exception
-class MirrorStatusError(Exception):
+# ServerStatus Exception
+class ServerStatusError(Exception):
     def __init__(self, msg):
         self.msg = msg
 
@@ -31,8 +48,45 @@ class MirrorStatusError(Exception):
         return repr(self.msg)
 
 
+# get external IP
+def get_ext_ip():
+    # requests.get("https://api.ipify.org/?format=json").json()['ip']
+    return urllib.request.urlopen('http://api.ipify.org').read()
+
+
+def get_server_list():
+    url = 'https://privatevpn.com/serverlist'
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    # add .decode('utf-8'))
+    return urllib.request.urlopen(req).read()
+
+
+def get_server_data():
+    sl = get_server_list()
+    soup = BeautifulSoup('serverlist.html', "html.parser")
+    # print(soup.prettify())
+    table = soup.find('table', class_='table-deluxe')
+    header = table.find("thead")
+    h = header.find_all('th')
+    if len(h) == 6:
+        print(h[0].find(text=True))
+        print(h[1].find(text=True))
+        print(h[2].find(text=True))
+        print(h[3].find(text=True))
+        print(h[4].find(text=True))
+        print(h[5].find(text=True))
+
+    for row in table.find_all("tr"):
+        cells = row.find('td')
+
+        from pprint import pprint
+        pprint(cells)
+
+
+# get cache file from temp folder
 def get_cache_file():
-    bname = 'mirrorstatus.json'
+    bname = 'pvpn_servers.json'
+    # linux
     path = os.getenv('XDG_CACHE_HOME')
     if path:
         try:
@@ -45,10 +99,14 @@ def get_cache_file():
         return '/tmp/.{}.{}'.format(getpass.getuser(), bname)
 
 
-class MirrorStatus(object):
-    # JSON URI
-    URL = 'https://www.archlinux.org/mirrors/status/json/'
+class ServerStatus(object):
+    # Server List URI
+    # URL = 'https://www.archlinux.org/mirrors/status/json/'
+    URL = 'https://privatevpn.com/serverlist'
+
     # Mirror URL format. Accepts server base URL, repository, and architecture.
+    # Server list table format
+    # Country	Server address	Port OpenVPN-TAP-UDP	OpenVPN-TUN-UDP/TCP	Socks5 Proxy	HTTP Proxy
     MIRROR_URL_FORMAT = '{0}{1}/os/{2}'
     MIRRORLIST_ENTRY_FORMAT = "Server = " + MIRROR_URL_FORMAT + "\n"
     DISPLAY_TIME_FORMAT = '%Y-%m-%d %H:%M:%S UTC'
@@ -65,7 +123,7 @@ class MirrorStatus(object):
     }
     # Known repositories, i.e. those that should be on each mirror.
     # Used to replace the "$repo" variable.
-    # TODO
+    #
     # Avoid using a hard-coded list.
     # See https://bugs.archlinux.org/task/32895
     REPOSITORIES = (
@@ -138,21 +196,21 @@ class MirrorStatus(object):
                         self.json_mtime = mtime
                         save_json = False
                     except IOError as e:
-                        raise MirrorStatusError('failed to load cached JSON data ({})'.format(e))
+                        raise ServerStatusError('failed to load cached JSON data ({})'.format(e))
             except OSError as e:
                 if e.errno != errno.ENOENT:
-                    raise MirrorStatusError('failed to get cache file mtime ({})'.format(e))
+                    raise ServerStatusError('failed to get cache file mtime ({})'.format(e))
 
         if not self.json_obj:
             try:
-                with urllib.request.urlopen(MirrorStatus.URL, None, self.connection_timeout) as f:
+                with urllib.request.urlopen(ServerStatus.URL, None, self.connection_timeout) as f:
                     json_str = f.read()
                     self.json_obj = json.loads(json_str.decode())
                     self.json_mtime = time.time()
             except (urllib.error.URLError, socket.timeout) as e:
-                raise MirrorStatusError('failed to retrieve mirror data: ({})'.format(e))
+                raise ServerStatusError('failed to retrieve mirror data: ({})'.format(e))
             except ValueError as e:
-                raise MirrorStatusError('failed to parse retrieved mirror data: ({})'.format(e))
+                raise ServerStatusError('failed to parse retrieved mirror data: ({})'.format(e))
 
         try:
             # Remove servers that have not synced, and parse the "last_sync" times for
@@ -168,11 +226,11 @@ class MirrorStatus(object):
             for mirror in mirrors:
                 mirror['last_sync'] = calendar.timegm(
                     time.strptime(mirror['last_sync'],
-                                  MirrorStatus.PARSE_TIME_FORMAT)
+                                  ServerStatus.PARSE_TIME_FORMAT)
                 )
             self.json_obj['urls'] = mirrors
         except KeyError:
-            raise MirrorStatusError(
+            raise ServerStatusError(
                 'failed to parse retrieved mirror data (the format may have changed or there may be a transient error)')
 
         if save_json and json_str:
@@ -180,7 +238,7 @@ class MirrorStatus(object):
                 with open(cache_file, 'wb') as f:
                     f.write(json_str)
             except IOError as e:
-                raise MirrorStatusError('failed to cache JSON data ({})'.format(e))
+                raise ServerStatusError('failed to cache JSON data ({})'.format(e))
 
     def get_obj(self):
         """Return the JSON object, retrieving new data if necessary."""
@@ -391,7 +449,7 @@ class MirrorStatus(object):
         '''Format a time for display.'''
         return time.strftime(self.DISPLAY_TIME_FORMAT, t)
 
-    # Return a Pacman-formatted mirrorlist
+    # Return a Pacman-formatted serverlist
     # TODO: Reconsider the assumption that self.json_obj has been retrieved.
     def get_mirrorlist(self, mirrors=None, include_country=False, cmd=None):
         if mirrors is None:
@@ -416,7 +474,7 @@ class MirrorStatus(object):
 
         width = 80
         colw = 11
-        header = '# Arch Linux mirrorlist generated by Reflector #'.center(width, '#')
+        header = '# PrivateVPN server list #'.center(width, '#')
         border = '#' * len(header)
         mirrorlist = '{}\n{}\n{}\n'.format(border, header, border) + \
                      '\n' + \
@@ -424,7 +482,7 @@ class MirrorStatus(object):
                          '# {{:<{:d}s}} {{}}'.format(colw).format(k, v) for k, v in (
                              ('With:', cmd),
                              ('When:', self.display_time(time.gmtime())),
-                             ('From:', MirrorStatus.URL),
+                             ('From:', ServerStatus.URL),
                              ('Retrieved:', self.display_time(time.gmtime(self.json_mtime))),
                              ('Last Check:', self.display_time(parsed_last_check)),
                          )
@@ -446,7 +504,7 @@ class MirrorStatus(object):
                         mirrorlist += '\n'
                     mirrorlist += '# {}\n'.format(c)
                     country = c
-            mirrorlist += MirrorStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'], '$repo', '$arch')
+            mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'], '$repo', '$arch')
 
         if no_mirrors:
             return None
@@ -462,6 +520,42 @@ class MirrorStatus(object):
             except KeyError:
                 countries[k] = 1
         return countries
+
+
+class ListCountries(argparse.Action):
+    '''
+    Action to list countries along with the number of mirrors in each.
+    '''
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        ms = ServerStatus()
+        countries = ms.list_countries()
+        w = max(len(c) for c, cc in countries)
+        n = len(str(max(countries.values())))
+        fmt = '{{:{:d}s}} {{}} {{:{:d}d}}'.format(w, n)
+        for (c, cc), n in sorted(countries.items(), key=lambda x: x[0][0]):
+            print(fmt.format(c, cc, n))
+        sys.exit(0)
+
+
+def print_mirror_info(mirrors, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
+    '''
+    Print information about each mirror to STDOUT.
+    '''
+    if mirrors:
+        if not isinstance(mirrors, list):
+            mirrors = list(mirrors)
+        ks = sorted(k for k in mirrors[0].keys() if k != 'url')
+        l = max(len(k) for k in ks)
+        fmt = '{{:{:d}s}} : {{}}'.format(l)
+        for m in mirrors:
+            print('{}$repo/os/$arch'.format(m['url']))
+            for k in ks:
+                v = m[k]
+                if k == 'last_sync':
+                    v = time.strftime(time_fmt, time.gmtime(v))
+                print(fmt.format(k, v))
+            print()
 
 
 def add_arguments(parser):
@@ -481,6 +575,11 @@ def add_arguments(parser):
     #   )
 
     parser.add_argument(
+        '--list-countries', action=ListCountries, nargs=0,
+        help='Display a table of the distribution of servers by country.'
+    )
+
+    parser.add_argument(
         '--cache-timeout', type=int, metavar='n', default=300,
         help='The cache timeout in seconds for the data retrieved from the Arch Linux Mirror Status API. The default is 300 (5 minutes).'
     )
@@ -490,9 +589,9 @@ def add_arguments(parser):
         help='Save the mirrorlist to the given path.'
     )
 
-    sort_help = '; '.join('"{}": {}'.format(k, v) for k, v in MirrorStatus.SORT_TYPES.items())
+    sort_help = '; '.join('"{}": {}'.format(k, v) for k, v in ServerStatus.SORT_TYPES.items())
     parser.add_argument(
-        '--sort', choices=MirrorStatus.SORT_TYPES,
+        '--sort', choices=ServerStatus.SORT_TYPES,
         help='Sort the mirrorlist. {}.'.format(sort_help)
     )
 
@@ -516,6 +615,17 @@ def add_arguments(parser):
         'The following filters are inclusive, i.e. the returned list will only contain mirrors for which all of the given conditions are met.'
     )
 
+    # not needed
+    filters.add_argument(
+        '-a', '--age', type=float, metavar='n',
+        help='Only return mirrors that have synchronized in the last n hours. n may be an integer or a decimal number.'
+    )
+
+    filters.add_argument(
+        '-c', '--country', dest='countries', action='append', metavar='<country>',
+        help='Match one of the given countries (case-sensitive). Use "--list-countries" to see which are available.'
+    )
+
     filters.add_argument(
         '-f', '--fastest', type=int, metavar='n',
         help='Return the n fastest mirrors that meet the other criteria. Do not use this option without other filtering options.'
@@ -531,11 +641,13 @@ def add_arguments(parser):
         help='Exclude servers that match <regex>, where <regex> is a Python regular express.'
     )
 
+    # not needed
     filters.add_argument(
         '-l', '--latest', type=int, metavar='n',
         help='Limit the list to the n most recently synchronized servers.'
     )
 
+    # not needed
     filters.add_argument(
         '--score', type=int, metavar='n',
         help='Limit the list to the n servers with the highest score.'
@@ -543,14 +655,16 @@ def add_arguments(parser):
 
     filters.add_argument(
         '-n', '--number', type=int, metavar='n',
-        help='Return at most n mirrors.'
+        help='Return at most n servers.'
     )
 
+    # not needed
     filters.add_argument(
         '-p', '--protocol', dest='protocols', action='append', metavar='<protocol>',
         help='Match one of the given protocols, e.g. "http", "ftp".'
     )
 
+    # not needed
     filters.add_argument(
         '--completion-percent', type=float, metavar='[0-100]', default=100.,
         help='Set the minimum completion percent for the returned mirrors. Check the mirrorstatus webpage for the meaning of this parameter. Default value: %(default)s.'
@@ -573,17 +687,11 @@ def parse_args(args=None):
 
 # Process options
 def process_options(options, ms=None, mirrors=None):
-    '''
-    Process options.
-
-    Optionally accepts a MirrorStatus object and/or the mirrors as returned by
-    the MirrorStatus.get_mirrors method.
-    '''
     if not ms:
-        ms = MirrorStatus(
+        ms = ServerStatus(
             verbose=options.verbose,
             connection_timeout=options.connection_timeout,
-            #       download_timeout=options.download_timeout,
+            # download_timeout=options.download_timeout,
             cache_timeout=options.cache_timeout,
             min_completion_pct=(options.completion_percent / 100.),
             threads=options.threads
@@ -623,26 +731,6 @@ def process_options(options, ms=None, mirrors=None):
     return ms, mirrors
 
 
-def print_mirror_info(mirrors, time_fmt=MirrorStatus.DISPLAY_TIME_FORMAT):
-    '''
-    Print information about each mirror to STDOUT.
-    '''
-    if mirrors:
-        if not isinstance(mirrors, list):
-            mirrors = list(mirrors)
-        ks = sorted(k for k in mirrors[0].keys() if k != 'url')
-        l = max(len(k) for k in ks)
-        fmt = '{{:{:d}s}} : {{}}'.format(l)
-        for m in mirrors:
-            print('{}$repo/os/$arch'.format(m['url']))
-            for k in ks:
-                v = m[k]
-                if k == 'last_sync':
-                    v = time.strftime(time_fmt, time.gmtime(v))
-                print(fmt.format(k, v))
-            print()
-
-
 def main(args=None, configure_logging=False):
     if args:
         cmd = tuple(args)
@@ -678,7 +766,7 @@ def main(args=None, configure_logging=False):
             mirrorlist = ms.get_mirrorlist(mirrors, include_country=include_country, cmd=cmd)
             if mirrorlist is None:
                 sys.exit('error: no mirrors found')
-    except MirrorStatusError as e:
+    except ServerStatusError as e:
         sys.exit('error: {}\n'.format(e.msg))
 
     if options.save:
@@ -699,4 +787,5 @@ def run_main(args=None, **kwargs):
 
 
 if __name__ == "__main__":
-    run_main(configure_logging=True)
+    get_server_data()
+    # run_main(configure_logging=True)
