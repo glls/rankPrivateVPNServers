@@ -58,21 +58,18 @@ def get_server_list():
     url = 'https://privatevpn.com/serverlist'
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     # add .decode('utf-8'))
-    return urllib.request.urlopen(req).read()
+    return urllib.request.urlopen(req).read().decode('utf-8')
 
 
 def get_server_data():
     # sl = get_server_list()
     soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
-
     table = soup.find('table', class_='table-deluxe')
-
     headers = []
     header = table.find("thead")
     for h in header.find_all('th'):
         text = h.text.replace("\n", "")
         headers.append(text)
-
     data = []
     rows = table.find_all("tr")
     for row in rows:
@@ -81,7 +78,6 @@ def get_server_data():
             tmp = tds[0].text.replace("\n", "").split("-")
             country = tmp[0].strip()
             city = tmp[1].strip() if len(tmp) > 1 else ""
-
             data.append({
                 'country': country,
                 'city': city,
@@ -91,11 +87,12 @@ def get_server_data():
                 'proxy_socks': tds[4].text.replace("\n", ""),
                 'proxy_http': tds[5].text.replace("\n", "")
             })
-
     dt = datetime.datetime.utcnow().__str__()
+
     return {
         'title': 'PrivateVPN Server list',
         'version': 1,
+        'headers': headers,
         'last_check': dt,
         'total': len(rows),
         'servers': data
@@ -105,6 +102,7 @@ def get_server_data():
 # get cache file from temp folder
 def get_cache_file():
     bname = 'pvpn_servers.json'
+    return '/tmp/.{}'.format(bname)
     # linux
     path = os.getenv('XDG_CACHE_HOME')
     if path:
@@ -119,19 +117,18 @@ def get_cache_file():
 
 
 class ServerStatus(object):
-    # Server List URI
-    # URL = 'https://www.archlinux.org/mirrors/status/json/'
-    URL = 'https://privatevpn.com/serverlist'
-
     # Mirror URL format. Accepts server base URL, repository, and architecture.
+    URL = 'https://privatevpn.com/serverlist'
     # Server list table format
     # Country	Server address	Port OpenVPN-TAP-UDP	OpenVPN-TUN-UDP/TCP	Socks5 Proxy	HTTP Proxy
-    MIRROR_URL_FORMAT = '{0}{1}/os/{2}'
+    # MIRROR_URL_FORMAT = '{0}{1}/os/{2}'
+    MIRROR_URL_FORMAT = '{0}'
     MIRRORLIST_ENTRY_FORMAT = "Server = " + MIRROR_URL_FORMAT + "\n"
     DISPLAY_TIME_FORMAT = '%Y-%m-%d %H:%M:%S UTC'
     PARSE_TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
     # Required for the last_check field, which oddly includes microseconds.
-    PARSE_TIME_FORMAT_WITH_USEC = '%Y-%m-%dT%H:%M:%S.%fZ'
+    # PARSE_TIME_FORMAT_WITH_USEC = '%Y-%m-%dT%H:%M:%S.%fZ'
+    PARSE_TIME_FORMAT_WITH_USEC = '%Y-%m-%d %H:%M:%S.%f'
     # Recognized list sort types and their descriptions.
     SORT_TYPES = {
         'age': 'last server synchronization',
@@ -198,7 +195,7 @@ class ServerStatus(object):
         self.threads = threads
 
     def retrieve(self):
-        """Retrieve the current mirror status JSON data."""
+        """Retrieve the current server status JSON data."""
         self.json_obj = None
         json_str = None
         save_json = False
@@ -222,39 +219,40 @@ class ServerStatus(object):
 
         if not self.json_obj:
             try:
-                with urllib.request.urlopen(ServerStatus.URL, None, self.connection_timeout) as f:
-                    json_str = f.read()
-                    self.json_obj = json.loads(json_str.decode())
-                    self.json_mtime = time.time()
+                # with urllib.request.urlopen(ServerStatus.URL, None, self.connection_timeout) as f:
+                json_str = json.JSONEncoder().encode(get_server_data())
+                self.json_obj = get_server_data()
+                # self.json_obj = json.JSONEncoder().encode(json_str)
+                self.json_mtime = time.time()
             except (urllib.error.URLError, socket.timeout) as e:
-                raise ServerStatusError('failed to retrieve mirror data: ({})'.format(e))
+                raise ServerStatusError('failed to retrieve server data: ({})'.format(e))
             except ValueError as e:
-                raise ServerStatusError('failed to parse retrieved mirror data: ({})'.format(e))
+                raise ServerStatusError('failed to parse retrieved server data: ({})'.format(e))
 
         try:
             # Remove servers that have not synced, and parse the "last_sync" times for
             # comparison later.
-            mirrors = self.json_obj['urls']
+            mirrors = json_str
             # Filter incomplete mirrors  and mirrors that haven't synced.
-            mirrors = list(
-                m for m in mirrors
-                if m['last_sync']
-                and m['completion_pct'] >= self.min_completion_pct
-            )
+            # mirrors = list(
+            #     m for m in mirrors
+            #     if m['last_sync']
+            #     and m['completion_pct'] >= self.min_completion_pct
+            # )
             # Parse 'last_sync' times for future comparison.
-            for mirror in mirrors:
-                mirror['last_sync'] = calendar.timegm(
-                    time.strptime(mirror['last_sync'],
-                                  ServerStatus.PARSE_TIME_FORMAT)
-                )
-            self.json_obj['urls'] = mirrors
+            # for mirror in mirrors:
+            #     mirror['last_sync'] = calendar.timegm(
+            #         time.strptime(mirror['last_sync'],
+            #                       ServerStatus.PARSE_TIME_FORMAT)
+            #     )
+            # self.json_obj['urls'] = mirrors
         except KeyError:
             raise ServerStatusError(
                 'failed to parse retrieved mirror data (the format may have changed or there may be a transient error)')
 
         if save_json and json_str:
             try:
-                with open(cache_file, 'wb') as f:
+                with open(cache_file, 'w') as f:
                     f.write(json_str)
             except IOError as e:
                 raise ServerStatusError('failed to cache JSON data ({})'.format(e))
@@ -269,26 +267,18 @@ class ServerStatus(object):
 
     def get_mirrors(self):
         """Get the mirrors."""
-        return self.get_obj()['urls']
+        return self.get_obj()['servers']
 
     def filter(
             self,
             mirrors=None,
             countries=None,
-            regexes=None,  # TODO: remove
             include=None,
             exclude=None,
             age=None,
             protocols=None
     ):
         """Filter using different parameters."""
-        # TODO: remove
-        if regexes:
-            #       raise MirrorStatusError('The "regexes" keyword has been deprecated and replaced by "include" and "exclude".')
-            if not include:
-                include = regexes
-            sys.stderr.write('''WARNING: The "regexes" keyword has been deprecated and replaced by "include" and "exclude".
-         Support will be soon removed without further warning.''')
         if mirrors is None:
             mirrors = self.get_mirrors()
 
@@ -523,7 +513,8 @@ class ServerStatus(object):
                         mirrorlist += '\n'
                     mirrorlist += '# {}\n'.format(c)
                     country = c
-            mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'], '$repo', '$arch')
+            # mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'], '$repo', '$arch')
+            mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'])
 
         if no_mirrors:
             return None
@@ -579,9 +570,9 @@ def print_mirror_info(mirrors, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
 
 def add_arguments(parser):
     '''
-    Add reflector arguments to the argument parser.
+    Add arguments to the argument parser.
     '''
-    parser = argparse.ArgumentParser(description='retrieve and filter a list of the latest Arch Linux mirrors')
+    parser = argparse.ArgumentParser(description='retrieve and filter a list of the latest PrivateVPN servers')
 
     parser.add_argument(
         '--connection-timeout', type=int, metavar='n', default=5,
@@ -605,18 +596,18 @@ def add_arguments(parser):
 
     parser.add_argument(
         '--save', metavar='<filepath>',
-        help='Save the mirrorlist to the given path.'
+        help='Save the serverlist to the given path.'
     )
 
     sort_help = '; '.join('"{}": {}'.format(k, v) for k, v in ServerStatus.SORT_TYPES.items())
     parser.add_argument(
         '--sort', choices=ServerStatus.SORT_TYPES,
-        help='Sort the mirrorlist. {}.'.format(sort_help)
+        help='Sort the serverlist. {}.'.format(sort_help)
     )
 
     parser.add_argument(
         '--threads', type=int, metavar='n',
-        help='The number of threads to use when rating mirrors.'
+        help='The number of threads to use when rating servers.'
     )
 
     parser.add_argument(
@@ -626,18 +617,18 @@ def add_arguments(parser):
 
     parser.add_argument(
         '--info', action='store_true',
-        help='Print mirror information instead of a mirror list. Filter options apply.'
+        help='Print mirror information instead of a server list. Filter options apply.'
     )
 
     filters = parser.add_argument_group(
         'filters',
-        'The following filters are inclusive, i.e. the returned list will only contain mirrors for which all of the given conditions are met.'
+        'The following filters are inclusive, i.e. the returned list will only contain servers for which all of the given conditions are met.'
     )
 
     # not needed
     filters.add_argument(
         '-a', '--age', type=float, metavar='n',
-        help='Only return mirrors that have synchronized in the last n hours. n may be an integer or a decimal number.'
+        help='Only return servers that have synchronized in the last n hours. n may be an integer or a decimal number.'
     )
 
     filters.add_argument(
@@ -647,7 +638,7 @@ def add_arguments(parser):
 
     filters.add_argument(
         '-f', '--fastest', type=int, metavar='n',
-        help='Return the n fastest mirrors that meet the other criteria. Do not use this option without other filtering options.'
+        help='Return the n fastest servers that meet the other criteria. Do not use this option without other filtering options.'
     )
 
     filters.add_argument(
@@ -686,7 +677,7 @@ def add_arguments(parser):
     # not needed
     filters.add_argument(
         '--completion-percent', type=float, metavar='[0-100]', default=100.,
-        help='Set the minimum completion percent for the returned mirrors. Check the mirrorstatus webpage for the meaning of this parameter. Default value: %(default)s.'
+        help='Set the minimum completion percent for the returned servers. Check the mirrorstatus webpage for the meaning of this parameter. Default value: %(default)s.'
     )
 
     return parser
@@ -697,7 +688,7 @@ def parse_args(args=None):
     Parse command-line arguments.
     '''
     parser = argparse.ArgumentParser(
-        description='retrieve and filter a list of the latest Arch Linux mirrors'
+        description='retrieve and filter a list of the latest PrivateVPN servers'
     )
     parser = add_arguments(parser)
     options = parser.parse_args(args)
@@ -806,7 +797,8 @@ def run_main(args=None, **kwargs):
 
 
 if __name__ == "__main__":
-    data = get_server_data()
-    a = json.JSONEncoder().encode(data)
-    print(a)
-    # run_main(configure_logging=True)
+    # server_data = get_server_data()
+    # a = json.JSONEncoder().encode(server_data)
+    # print(a)
+
+    run_main(configure_logging=True)
