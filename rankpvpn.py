@@ -17,7 +17,6 @@
 
 
 import argparse
-import calendar
 import datetime
 import errno
 import getpass
@@ -36,8 +35,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import pycountry
 from bs4 import BeautifulSoup
-
+from multiping import MultiPing
 
 # ServerStatus Exception
 class ServerStatusError(Exception):
@@ -61,6 +61,28 @@ def get_server_list():
     return urllib.request.urlopen(req).read().decode('utf-8')
 
 
+def get_country_code(country):
+    try:
+        country_code = pycountry.countries.get(name=country).alpha_2
+    except KeyError:
+        try:
+            country_code = pycountry.countries.get(common_name=country).alpha_2
+        except KeyError:
+            try:
+                country_code = pycountry.countries.get(official_name=country).alpha_2
+            except KeyError:
+                if country == 'Russia':
+                    country_code = "RU"
+                elif country == 'South Korea':
+                    country_code = "KR"
+                elif country == 'USA':
+                    country_code = "US"
+                else:
+                    country_code = "ERROR"
+
+    return country_code
+
+
 def get_server_data():
     # sl = get_server_list()
     soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
@@ -78,14 +100,16 @@ def get_server_data():
             tmp = tds[0].text.replace("\n", "").split("-")
             country = tmp[0].strip()
             city = tmp[1].strip() if len(tmp) > 1 else ""
+
             data.append({
                 'country': country,
+                "country_code": get_country_code(country),
                 'city': city,
-                'url': tds[1].text.replace("\n", ""),
-                'port_tap': tds[2].text.replace("\n", ""),
-                'port_tun': tds[3].text.replace("\n", ""),
-                'proxy_socks': tds[4].text.replace("\n", ""),
-                'proxy_http': tds[5].text.replace("\n", "")
+                'url': tds[1].text.replace("\n", "").strip(),
+                'port_tap': tds[2].text.replace("\n", "").strip(),
+                'port_tun': tds[3].text.replace("\n", "").strip(),
+                'proxy_socks': tds[4].text.replace("\n", "").strip(),
+                'proxy_http': tds[5].text.replace("\n", "").strip()
             })
     dt = datetime.datetime.utcnow().__str__()
 
@@ -137,27 +161,6 @@ class ServerStatus(object):
         'score': 'MirrorStatus score',
         'delay': 'MirrorStatus delay',
     }
-    # Known repositories, i.e. those that should be on each mirror.
-    # Used to replace the "$repo" variable.
-    #
-    # Avoid using a hard-coded list.
-    # See https://bugs.archlinux.org/task/32895
-    REPOSITORIES = (
-        'community',
-        'community-staging',
-        'community-testing',
-        'core',
-        'extra',
-        'gnome-unstable',
-        'kde-unstable',
-        'multilib',
-        'multilib-testing'
-        'staging',
-        'testing'
-    )
-
-    # Known system architectures, as used to replace the "$arch" variable.
-    ARCHITECTURES = ['x86_64']
 
     # Initialize
     # refresh_interval:
@@ -371,6 +374,10 @@ class ServerStatus(object):
         def worker():
             while True:
                 url = q_in.get()
+
+                mp = MultiPing([url])
+                mp.send()
+
                 db_subpath = 'core/os/x86_64/core.db'
                 db_url = url + db_subpath
                 scheme = urllib.parse.urlparse(url).scheme
@@ -559,7 +566,7 @@ def print_mirror_info(mirrors, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
         l = max(len(k) for k in ks)
         fmt = '{{:{:d}s}} : {{}}'.format(l)
         for m in mirrors:
-            print('{}$repo/os/$arch'.format(m['url']))
+            print('{}'.format(m['url']))
             for k in ks:
                 v = m[k]
                 if k == 'last_sync':
@@ -617,7 +624,7 @@ def add_arguments(parser):
 
     parser.add_argument(
         '--info', action='store_true',
-        help='Print mirror information instead of a server list. Filter options apply.'
+        help='Print server information instead of a server list. Filter options apply.'
     )
 
     filters = parser.add_argument_group(
@@ -800,5 +807,4 @@ if __name__ == "__main__":
     # server_data = get_server_data()
     # a = json.JSONEncoder().encode(server_data)
     # print(a)
-
     run_main(configure_logging=True)
