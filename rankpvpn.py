@@ -62,25 +62,44 @@ def get_server_list():
 
 
 def get_server_data():
-    sl = get_server_list()
-    soup = BeautifulSoup('serverlist.html', "html.parser")
-    # print(soup.prettify())
+    # sl = get_server_list()
+    soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
+
     table = soup.find('table', class_='table-deluxe')
+
+    headers = []
     header = table.find("thead")
-    h = header.find_all('th')
-    if len(h) == 6:
-        print(h[0].find(text=True))
-        print(h[1].find(text=True))
-        print(h[2].find(text=True))
-        print(h[3].find(text=True))
-        print(h[4].find(text=True))
-        print(h[5].find(text=True))
+    for h in header.find_all('th'):
+        text = h.text.replace("\n", "")
+        headers.append(text)
 
-    for row in table.find_all("tr"):
-        cells = row.find('td')
+    data = []
+    rows = table.find_all("tr")
+    for row in rows:
+        tds = row.find_all("td")
+        if len(tds) == 6:
+            tmp = tds[0].text.replace("\n", "").split("-")
+            country = tmp[0].strip()
+            city = tmp[1].strip() if len(tmp) > 1 else ""
 
-        from pprint import pprint
-        pprint(cells)
+            data.append({
+                'country': country,
+                'city': city,
+                'url': tds[1].text.replace("\n", ""),
+                'port_tap': tds[2].text.replace("\n", ""),
+                'port_tun': tds[3].text.replace("\n", ""),
+                'proxy_socks': tds[4].text.replace("\n", ""),
+                'proxy_http': tds[5].text.replace("\n", "")
+            })
+
+    dt = datetime.datetime.utcnow().__str__()
+    return {
+        'title': 'PrivateVPN Server list',
+        'version': 1,
+        'last_check': dt,
+        'total': len(rows),
+        'servers': data
+    }
 
 
 # get cache file from temp folder
@@ -787,5 +806,7 @@ def run_main(args=None, **kwargs):
 
 
 if __name__ == "__main__":
-    get_server_data()
+    data = get_server_data()
+    a = json.JSONEncoder().encode(data)
+    print(a)
     # run_main(configure_logging=True)
