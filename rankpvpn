@@ -78,7 +78,7 @@ def get_country_code(country):
                 elif country == 'USA':
                     country_code = "US"
                 else:
-                    country_code = "ERROR"
+                    country_code = "--"
 
     return country_code
 
@@ -375,9 +375,6 @@ class ServerStatus(object):
             while True:
                 url = q_in.get()
 
-                mp = MultiPing([url])
-                mp.send()
-
                 db_subpath = 'core/os/x86_64/core.db'
                 db_url = url + db_subpath
                 scheme = urllib.parse.urlparse(url).scheme
@@ -473,7 +470,7 @@ class ServerStatus(object):
         if cmd is None:
             cmd = '?'
         else:
-            cmd = 'reflector ' + ' '.join(pipes.quote(x) for x in cmd)
+            cmd = 'rankpvpn ' + ' '.join(pipes.quote(x) for x in cmd)
 
         last_check = self.json_obj['last_check']
         # For some reason the "last_check" field included microseconds.
@@ -773,7 +770,7 @@ def main(args=None, configure_logging=False):
         if mirrors is not None and not isinstance(mirrors, list):
             mirrors = list(mirrors)
         if not mirrors:
-            sys.exit('error: no mirrors found')
+            sys.exit('ERROR: No servers found')
         include_country = options.sort == 'country'
         # Convert the generator object to a list for re-use later.
         if options.info:
@@ -782,7 +779,7 @@ def main(args=None, configure_logging=False):
         else:
             mirrorlist = ms.get_mirrorlist(mirrors, include_country=include_country, cmd=cmd)
             if mirrorlist is None:
-                sys.exit('error: no mirrors found')
+                sys.exit('ERROR: No servers found')
     except ServerStatusError as e:
         sys.exit('error: {}\n'.format(e.msg))
 
