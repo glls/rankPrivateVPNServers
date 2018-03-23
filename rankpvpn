@@ -37,7 +37,7 @@ import urllib.error
 import urllib.request
 import pycountry
 from bs4 import BeautifulSoup
-from multiping import MultiPing
+
 
 # ServerStatus Exception
 class ServerStatusError(Exception):
@@ -125,8 +125,7 @@ def get_server_data():
 
 # get cache file from temp folder
 def get_cache_file():
-    bname = 'pvpn_servers.json'
-    return '/tmp/.{}'.format(bname)
+    bname = 'privatevpn_servers.json'
     # linux
     path = os.getenv('XDG_CACHE_HOME')
     if path:
@@ -141,13 +140,13 @@ def get_cache_file():
 
 
 class ServerStatus(object):
-    # Mirror URL format. Accepts server base URL, repository, and architecture.
     URL = 'https://privatevpn.com/serverlist'
+
     # Server list table format
     # Country	Server address	Port OpenVPN-TAP-UDP	OpenVPN-TUN-UDP/TCP	Socks5 Proxy	HTTP Proxy
     # MIRROR_URL_FORMAT = '{0}{1}/os/{2}'
     MIRROR_URL_FORMAT = '{0}'
-    MIRRORLIST_ENTRY_FORMAT = "Server = " + MIRROR_URL_FORMAT + "\n"
+    MIRRORLIST_ENTRY_FORMAT = MIRROR_URL_FORMAT + "\n"
     DISPLAY_TIME_FORMAT = '%Y-%m-%d %H:%M:%S UTC'
     PARSE_TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
     # Required for the last_check field, which oddly includes microseconds.
@@ -204,6 +203,7 @@ class ServerStatus(object):
         save_json = False
 
         cache_file = get_cache_file()
+        print(cache_file)
         if self.cache_timeout > 0:
             save_json = True
             try:
@@ -268,13 +268,12 @@ class ServerStatus(object):
 
         return self.json_obj
 
-    def get_mirrors(self):
-        """Get the mirrors."""
+    def get_servers(self):
         return self.get_obj()['servers']
 
     def filter(
             self,
-            mirrors=None,
+            servers=None,
             countries=None,
             include=None,
             exclude=None,
@@ -282,87 +281,87 @@ class ServerStatus(object):
             protocols=None
     ):
         """Filter using different parameters."""
-        if mirrors is None:
-            mirrors = self.get_mirrors()
+        if servers is None:
+            servers = self.get_servers()
 
         t = time.time()
         n = 0
 
         # Make country arguments case-insensitive.
         uc_countries = tuple(c.upper() for c in countries) if countries else None
-        for mirror in mirrors:
+        for server in servers:
             # Filter by country.
             if countries \
                     and not ( \
-                            mirror['country'].upper() in uc_countries or \
-                            mirror['country_code'].upper() in uc_countries \
+                            server['country'].upper() in uc_countries or \
+                            server['country_code'].upper() in uc_countries \
                     ):
                 continue
             # Filter by protocol.
-            if protocols and not mirror['protocol'] in protocols:
+            if protocols and not server['protocol'] in protocols:
                 continue
             # Filter by regex.
             # TODO: Find a better way to do this.
             if include:
                 for regex in include:
-                    if re.search(regex, mirror['url']):
+                    if re.search(regex, server['url']):
                         break
                 else:
                     continue
             if exclude:
                 discard = False
                 for regex in exclude:
-                    if re.search(regex, mirror['url']):
+                    if re.search(regex, server['url']):
                         discard = True
                         break
                 if discard:
                     continue
             # Filter by hours since last sync.
-            if age and t > (age * 60 ** 2 + mirror['last_sync']):
+            if age and t > (age * 60 ** 2 + server['last_sync']):
                 continue
 
             # Yield if we're still here.
-            yield mirror
+            yield server
 
-    def sort(self, mirrors=None, by=None):
+    def sort(self, servers=None, by=None):
         """Sort using different parameters."""
-        if mirrors is None:
-            mirrors = self.get_mirrors()
-        # Ensure that "mirrors" is a list that can be sorted.
-        if not isinstance(mirrors, list):
-            mirrors = list(mirrors)
+        if servers is None:
+            servers = self.get_servers()
+        # Ensure that "servers" is a list that can be sorted.
+        if not isinstance(servers, list):
+            servers = list(servers)
 
         if by == 'age':
-            mirrors.sort(key=lambda m: m['last_sync'], reverse=True)
+            servers.sort(key=lambda m: m['last_sync'], reverse=True)
         elif by == 'rate':
-            mirrors = self.rate(mirrors)
+            servers = self.rate(servers)
         elif by in ('country', 'country_code', 'delay', 'score'):
-            mirrors.sort(key=lambda m: m[by])
-        return mirrors
+            servers.sort(key=lambda m: m[by])
+        return servers
 
     # Sort mirrors by download speed. Download speed will be calculated from the
     # download time of the [core] database from each server.
     # TODO: Consider ways to improve this.
     # TODO: Consider the effects of threading (do the threads affect the results
     #       by competing for bandwidth?)
-    def rate(self, mirrors=None, threads=5):
-        if mirrors is None:
-            mirrors = self.get_mirrors()
+    def rate(self, servers=None, threads=5):
+        if servers is None:
+            servers = self.get_servers()
         if not threads:
             threads = self.threads
-        # Ensure that "mirrors" is a list and not a generator.
-        if not isinstance(mirrors, list):
-            mirrors = list(mirrors)
+        # Ensure that "servers" is a list and not a generator.
+        if not isinstance(servers, list):
+            servers = list(servers)
 
-        if not mirrors:
-            logging.warning('no mirrors selected for rating')
-            return mirrors
+        if not servers:
+            logging.warning('no servers selected for rating')
+            return servers
 
         # Ensure a sane number of threads.
         if threads < 1:
             threads = 1
         else:
-            threads = min(threads, len(mirrors))
+            threads = min(threads, len(servers))
 
         rates = {}
 
@@ -384,6 +383,8 @@ class ServerStatus(object):
                 dt = float('NaN')
 
                 # urllib cannot handle rsync protocol
+
+                # TODO: replace with ping
                 if scheme == 'rsync':
                     rsync_cmd = [
                         'rsync',
@@ -427,10 +428,10 @@ class ServerStatus(object):
             t.start()
 
         # Load the input queue.Queue
-        url_len = max(len(m['url']) for m in mirrors)
-        for mirror in mirrors:
-            logging.info("rating {}".format(mirror['url']))
-            q_in.put(mirror['url'])
+        url_len = max(len(m['url']) for m in servers)
+        for server in servers:
+            logging.info("rating {}".format(server['url']))
+            q_in.put(server['url'])
 
         q_in.join()
 
@@ -445,7 +446,7 @@ class ServerStatus(object):
 
         # Loop over the mirrors just to ensure that we get the rate for each mirror.
         # The value in the loop does not (necessarily) correspond to the mirror.
-        for _ in mirrors:
+        for _ in servers:
             url, rate, dt = q_out.get()
             kibps = rate / 1024.0
             logging.info(fmt.format(url, kibps, dt))
@@ -453,20 +454,19 @@ class ServerStatus(object):
             q_out.task_done()
 
         # Sort by rate.
-        rated_mirrors = [m for m in mirrors if rates[m['url']] > 0]
+        rated_mirrors = [m for m in servers if rates[m['url']] > 0]
         rated_mirrors.sort(key=lambda m: rates[m['url']], reverse=True)
 
-        return rated_mirrors + [m for m in mirrors if rates[m['url']] == 0]
+        return rated_mirrors + [m for m in servers if rates[m['url']] == 0]
 
     def display_time(self, t=None):
         '''Format a time for display.'''
         return time.strftime(self.DISPLAY_TIME_FORMAT, t)
 
-    # Return a Pacman-formatted serverlist
     # TODO: Reconsider the assumption that self.json_obj has been retrieved.
-    def get_mirrorlist(self, mirrors=None, include_country=False, cmd=None):
-        if mirrors is None:
-            mirrors = self.get_mirrors()
+    def get_serverlist(self, servers=None, include_country=False, cmd=None):
+        if servers is None:
+            servers = self.get_servers()
         if cmd is None:
             cmd = '?'
         else:
@@ -487,9 +487,9 @@ class ServerStatus(object):
 
         width = 80
         colw = 11
-        header = '# PrivateVPN server list #'.center(width, '#')
+        header = '# PrivateVPN Server list #'.center(width, '#')
         border = '#' * len(header)
-        mirrorlist = '{}\n{}\n{}\n'.format(border, header, border) + \
+        serverlist = '{}\n{}\n{}\n'.format(border, header, border) + \
                      '\n' + \
                      '\n'.join(
                          '# {{:<{:d}s}} {{}}'.format(colw).format(k, v) for k, v in (
@@ -506,28 +506,28 @@ class ServerStatus(object):
 
         # mirrors may be a generator so "if mirrors" will not work
         no_mirrors = True
-        for mirror in mirrors:
+        for server in servers:
             no_mirrors = False
             # Include country tags. This is intended for lists that are sorted by
             # country.
             if include_country:
-                c = '{} [{}]'.format(mirror['country'], mirror['country_code'])
+                c = '{} [{}]'.format(server['country'], server['country_code'])
                 if c != country:
                     if country:
-                        mirrorlist += '\n'
-                    mirrorlist += '# {}\n'.format(c)
+                        serverlist += '\n'
+                    serverlist += '# {}\n'.format(c)
                     country = c
             # mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'], '$repo', '$arch')
-            mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'])
+            serverlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(server['url'])
 
         if no_mirrors:
             return None
         else:
-            return mirrorlist
+            return serverlist
 
     def list_countries(self):
         countries = dict()
-        for m in self.get_mirrors():
+        for m in self.get_servers():
             k = (m['country'], m['country_code'])
             try:
                 countries[k] += 1
@@ -552,17 +552,17 @@ class ListCountries(argparse.Action):
         sys.exit(0)
 
 
-def print_mirror_info(mirrors, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
+def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
     '''
     Print information about each mirror to STDOUT.
     '''
-    if mirrors:
-        if not isinstance(mirrors, list):
-            mirrors = list(mirrors)
-        ks = sorted(k for k in mirrors[0].keys() if k != 'url')
+    if servers:
+        if not isinstance(servers, list):
+            servers = list(servers)
+        ks = sorted(k for k in servers[0].keys() if k != 'url')
         l = max(len(k) for k in ks)
         fmt = '{{:{:d}s}} : {{}}'.format(l)
-        for m in mirrors:
+        for m in servers:
             print('{}'.format(m['url']))
             for k in ks:
                 v = m[k]
@@ -642,7 +642,8 @@ def add_arguments(parser):
 
     filters.add_argument(
         '-f', '--fastest', type=int, metavar='n',
-        help='Return the n fastest servers that meet the other criteria. Do not use this option without other filtering options.'
+        help='Return the n fastest servers that meet the other criteria.'
+             ' Do not use this option without other filtering options.'
     )
 
     filters.add_argument(
@@ -681,7 +682,8 @@ def add_arguments(parser):
     # not needed
     filters.add_argument(
         '--completion-percent', type=float, metavar='[0-100]', default=100.,
-        help='Set the minimum completion percent for the returned servers. Check the mirrorstatus webpage for the meaning of this parameter. Default value: %(default)s.'
+        help='Set the minimum completion percent for the returned servers.'
+             ' Check the mirrorstatus webpage for the meaning of this parameter. Default value: %(default)s.'
     )
 
     return parser
@@ -700,7 +702,7 @@ def parse_args(args=None):
 
 
 # Process options
-def process_options(options, ms=None, mirrors=None):
+def process_options(options, ms=None, servers=None):
     if not ms:
         ms = ServerStatus(
             verbose=options.verbose,
@@ -711,12 +713,12 @@ def process_options(options, ms=None, mirrors=None):
             threads=options.threads
         )
 
-    if mirrors is None:
-        mirrors = ms.get_mirrors()
+    if servers is None:
+        servers = ms.get_servers()
 
     # Filter
-    mirrors = ms.filter(
-        mirrors,
+    servers = ms.filter(
+        servers,
         countries=options.countries,
         include=options.include,
         exclude=options.exclude,
@@ -725,24 +727,24 @@ def process_options(options, ms=None, mirrors=None):
     )
 
     if options.latest and options.latest > 0:
-        mirrors = ms.sort(mirrors, by='age')
-        mirrors = mirrors[:options.latest]
+        servers = ms.sort(servers, by='age')
+        servers = servers[:options.latest]
 
     if options.score and options.score > 0:
-        mirrors = ms.sort(mirrors, by='score')
-        mirrors = mirrors[:options.score]
+        servers = ms.sort(servers, by='score')
+        servers = servers[:options.score]
 
     if options.fastest and options.fastest > 0:
-        mirrors = ms.sort(mirrors, by='rate')
-        mirrors = mirrors[:options.fastest]
+        servers = ms.sort(servers, by='rate')
+        servers = servers[:options.fastest]
 
     if options.sort and not (options.sort == 'rate' and options.fastest):
-        mirrors = ms.sort(mirrors, by=options.sort)
+        servers = ms.sort(servers, by=options.sort)
 
     if options.number:
-        mirrors = list(mirrors)[:options.number]
+        servers = list(servers)[:options.number]
 
-    return ms, mirrors
+    return ms, servers
 
 
 def main(args=None, configure_logging=False):
@@ -766,19 +768,19 @@ def main(args=None, configure_logging=False):
         )
 
     try:
-        ms, mirrors = process_options(options)
-        if mirrors is not None and not isinstance(mirrors, list):
-            mirrors = list(mirrors)
-        if not mirrors:
+        ms, servers = process_options(options)
+        if servers is not None and not isinstance(servers, list):
+            servers = list(servers)
+        if not servers:
             sys.exit('ERROR: No servers found')
         include_country = options.sort == 'country'
         # Convert the generator object to a list for re-use later.
         if options.info:
-            print_mirror_info(mirrors)
+            print_server_info(servers)
             return
         else:
-            mirrorlist = ms.get_mirrorlist(mirrors, include_country=include_country, cmd=cmd)
-            if mirrorlist is None:
+            serverlist = ms.get_serverlist(servers, include_country=include_country, cmd=cmd)
+            if serverlist is None:
                 sys.exit('ERROR: No servers found')
     except ServerStatusError as e:
         sys.exit('error: {}\n'.format(e.msg))
@@ -786,11 +788,11 @@ def main(args=None, configure_logging=False):
     if options.save:
         try:
             with open(options.save, 'w') as f:
-                f.write(mirrorlist)
+                f.write(serverlist)
         except IOError as e:
-            sys.exit('error: {}\n'.format(e.strerror))
+            sys.exit('ERROR: {}\n'.format(e.strerror))
     else:
-        print(mirrorlist)
+        print(serverlist)
 
 
 def run_main(args=None, **kwargs):
@@ -801,7 +803,4 @@ def run_main(args=None, **kwargs):
 
 
 if __name__ == "__main__":
-    # server_data = get_server_data()
-    # a = json.JSONEncoder().encode(server_data)
-    # print(a)
     run_main(configure_logging=True)
