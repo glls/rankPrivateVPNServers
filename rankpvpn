@@ -332,7 +332,6 @@ class ServerStatus(object):
         '''Format a time for display.'''
         return time.strftime(self.DISPLAY_TIME_FORMAT, t)
 
-    # TODO: Reconsider the assumption that self.json_obj has been retrieved.
     def get_serverlist(self, servers=None, include_country=False, cmd=None):
         if servers is None:
             servers = self.get_servers()
@@ -340,19 +339,6 @@ class ServerStatus(object):
             cmd = '?'
         else:
             cmd = 'rankpvpn ' + ' '.join(pipes.quote(x) for x in cmd)
-
-        last_check = self.json_obj['last_check']
-        # For some reason the "last_check" field included microseconds.
-        # try:
-        #     parsed_last_check = datetime.datetime.strptime(
-        #         last_check,
-        #         self.PARSE_TIME_FORMAT_WITH_USEC,
-        #     ).timetuple()
-        # except ValueError:
-        #     parsed_last_check = datetime.datetime.strptime(
-        #         last_check,
-        #         self.PARSE_TIME_FORMAT,
-        #     ).timetuple()
 
         width = 80
         colw = 11
@@ -440,7 +426,7 @@ def add_arguments(parser):
     '''
     Add arguments to the argument parser.
     '''
-    parser = argparse.ArgumentParser(description='retrieve and filter a list of the PrivateVPN servers')
+    parser = argparse.ArgumentParser(description='Retrieve and filter the list of PrivateVPN servers')
 
     parser.add_argument(
         '--list-countries', action=ListCountries, nargs=0,
@@ -503,6 +489,16 @@ def add_arguments(parser):
     filters.add_argument(
         '-n', '--number', type=int, metavar='n',
         help='Return at most n servers.'
+    )
+
+    filters.add_argument(
+        '-r', '--random', type=int, metavar='n',
+        help='Choose a random server.'
+    )
+
+    filters.add_argument(
+        '--ip', action='store_true',
+        help='Display your public IP.'
     )
 
     # not needed
