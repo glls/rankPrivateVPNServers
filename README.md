@@ -1,5 +1,7 @@
 # rankPrivateVPNServers
 
+List and rate the PrivateVPN servers
+
 ```
 usage: rankpvpn [-h] [--list-countries] [--save <filepath>]
                 [--sort {rate,country}] [--threads n] [--verbose] [--info]
@@ -41,3 +43,5 @@ filters:
   -r, --random          Choose a random server.
 
 ```
+
+Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
