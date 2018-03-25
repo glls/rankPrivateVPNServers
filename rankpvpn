@@ -459,6 +459,11 @@ def add_arguments(parser):
         help='Print server information instead of a server list. Filter options apply.'
     )
 
+    parser.add_argument(
+        '--ip', action='store_true',
+        help='Display your public IP.'
+    )
+
     filters = parser.add_argument_group(
         'filters',
         'The following filters are inclusive, i.e. the returned list will only '
@@ -478,12 +483,12 @@ def add_arguments(parser):
 
     filters.add_argument(
         '-i', '--include', metavar='<regex>', action='append',
-        help='Include servers that match <regex>, where <regex> is a Python regular express.'
+        help='Include servers that match <regex>.'
     )
 
     filters.add_argument(
         '-x', '--exclude', metavar='<regex>', action='append',
-        help='Exclude servers that match <regex>, where <regex> is a Python regular express.'
+        help='Exclude servers that match <regex>.'
     )
 
     filters.add_argument(
@@ -492,13 +497,8 @@ def add_arguments(parser):
     )
 
     filters.add_argument(
-        '-r', '--random', type=int, metavar='n',
+        '-r', '--random', action='store_true',
         help='Choose a random server.'
-    )
-
-    filters.add_argument(
-        '--ip', action='store_true',
-        help='Display your public IP.'
     )
 
     # not needed
@@ -613,6 +613,6 @@ def run_main(args=None, **kwargs):
 if __name__ == "__main__":
     run_main(configure_logging=True)
 
-# TODO:
-#  --random choose random server
-#  --ip display your public IP
+#TODO:
+# test -i regex
+# test -x regex
