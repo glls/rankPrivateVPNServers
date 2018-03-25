@@ -20,7 +20,6 @@ import argparse
 import datetime
 import errno
 import getpass
-import http.client
 import json
 import logging
 import os
@@ -28,9 +27,7 @@ import pipes
 import queue
 import re
 import socket
-import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.error
@@ -50,21 +47,20 @@ class ServerStatusError(Exception):
 
 
 # return round-trip avg ms
-def ping(ips, cnt=3, wait=0.3):
-    procs = []
-    ret = {}
-    for ip in ips:
-        # procs.append(Popen(('ping', '-c5', '-n', '-w5', '-i0.3', ip),
-        procs.append(Popen(('ping', '-c' + str(cnt), '-i' + str(wait), ip),
-                           stdout=PIPE, stderr=STDOUT))
-    for pr in procs:
-        out = str(pr.communicate()[0])
-        if 'bytes from' in out:
-            # extract IP
-            ip = re.search(r'([\d]+.[\d]+.[\d+]+.[\d]+)', out).groups()[0]
-            # linux
-            # ret[ip] = float(re.search(r'min/avg/max/mdev = [\d.]+/([\d.]+)', out).groups()[0])
-            ret[ip] = float(re.search(r'min/avg/max/stddev = [\d.]+/([\d.]+)', out).groups()[0])
+def ping(ip, cnt=3, wait=0.3):
+    ret = 0.0
+    pr = Popen(('ping', '-c' + str(cnt), '-i' + str(wait), ip),
+               stdout=PIPE, stderr=STDOUT)
+
+    out = str(pr.communicate()[0])
+    if 'bytes from' in out:
+        # linux
+        if sys.platform == "linux" or sys.platform == "linux2":
+            ret = float(re.search(r'min/avg/max/mdev = [\d.]+/([\d.]+)', out).groups()[0])
+        elif sys.platform == "darwin":
+            ret = float(re.search(r'min/avg/max/stddev = [\d.]+/([\d.]+)', out).groups()[0])
+        elif sys.platform == "win32":
+            ret = float(re.search(r'min/avg/max/stddev = [\d.]+/([\d.]+)', out).groups()[0])
     return ret
 
 
@@ -73,12 +69,6 @@ def get_ext_ip():
     # requests.get("https://api.ipify.org/?format=json").json()['ip']
     ip = str(urllib.request.urlopen('http://api.ipify.org').read().decode('utf-8'))
     return ip
-
-
-def get_server_list():
-    url = 'https://privatevpn.com/serverlist'
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    return urllib.request.urlopen(req).read().decode('utf-8')
 
 
 def get_country_code(country):
@@ -103,9 +93,18 @@ def get_country_code(country):
     return country_code
 
 
+def get_server_list():
+    url = 'https://privatevpn.com/serverlist'
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req) as response:
+        return response.read().decode('utf-8')
+
+
 def get_server_data():
-    # sl = get_server_list()
-    soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
+    # Debug:
+    # soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
+    sl = get_server_list()
+    soup = BeautifulSoup(sl, "html.parser")
     table = soup.find('table', class_='table-deluxe')
     headers = []
     header = table.find("thead")
@@ -143,28 +142,11 @@ def get_server_data():
     }
 
 
-# get cache file from temp folder
-def get_cache_file():
-    bname = 'privatevpn_servers.json'
-    # linux
-    path = os.getenv('XDG_CACHE_HOME')
-    if path:
-        try:
-            os.makedirs(path, exist_ok=True)
-        # Raised if permissions do not match umask
-        except FileExistsError:
-            pass
-        return os.path.join(path, bname)
-    else:
-        return '/tmp/.{}.{}'.format(getpass.getuser(), bname)
-
-
 class ServerStatus(object):
     URL = 'https://privatevpn.com/serverlist'
 
     # Server list table format
     # Country	Server address	Port OpenVPN-TAP-UDP	OpenVPN-TUN-UDP/TCP	Socks5 Proxy	HTTP Proxy
-    # MIRROR_URL_FORMAT = '{0}{1}/os/{2}'
     MIRROR_URL_FORMAT = '{0}'
     MIRRORLIST_ENTRY_FORMAT = MIRROR_URL_FORMAT + "\n"
     DISPLAY_TIME_FORMAT = '%Y-%m-%d %H:%M:%S UTC'
@@ -174,122 +156,46 @@ class ServerStatus(object):
     PARSE_TIME_FORMAT_WITH_USEC = '%Y-%m-%d %H:%M:%S.%f'
     # Recognized list sort types and their descriptions.
     SORT_TYPES = {
-        'age': 'last server synchronization',
-        'rate': 'download rate',  # replace with avg_ping
+        'rate': 'avarage ping',
         'country': 'server\'s location',
-        'score': 'ServerStatus score',  # not used
-        'delay': 'ServerStatus delay',  # not used
     }
 
     # Initialize
-    # refresh_interval:
-    #   The cached list will be replaced after this many seconds have passed.
-    #   0 effectively disables caching.
-    #   Caching is only useful if the object persists, e.g. if it were embedded
-    #   in a server.
     def __init__(
             self,
-            refresh_interval=0,
             verbose=False,
-            connection_timeout=5,
-            # download_timeout=None,
-            cache_timeout=300,
-            min_completion_pct=1.,
             threads=5
     ):
-        self.refresh_interval = refresh_interval
-
-        # Last modification time of the json object.
-        self.json_mtime = 0
         # The parsed JSON object.
         self.json_obj = {}
         # Display extra information.
         self.verbose = verbose
-        # Connection timeout
-        self.connection_timeout = connection_timeout
-        # Download timeout
-        #     self.download_timeout = download_timeout
-        # Cache timeout
-        self.cache_timeout = cache_timeout
-        # Minimum completion percent, for filtering mirrors.
-        self.min_completion_pct = min_completion_pct
         # Threads
         self.threads = threads
 
     def retrieve(self):
         """Retrieve the current server status JSON data."""
         self.json_obj = None
-        json_str = None
-        save_json = False
-
-        cache_file = get_cache_file()
-        print(cache_file)
-        if self.cache_timeout > 0:
-            save_json = True
-            try:
-                mtime = os.path.getmtime(cache_file)
-                if time.time() - mtime < self.cache_timeout:
-                    try:
-                        with open(cache_file) as f:
-                            self.json_obj = json.load(f)
-                        self.json_mtime = mtime
-                        save_json = False
-                    except IOError as e:
-                        raise ServerStatusError('failed to load cached JSON data ({})'.format(e))
-            except OSError as e:
-                if e.errno != errno.ENOENT:
-                    raise ServerStatusError('failed to get cache file mtime ({})'.format(e))
 
         if not self.json_obj:
             try:
-                # with urllib.request.urlopen(ServerStatus.URL, None, self.connection_timeout) as f:
-                json_str = json.JSONEncoder().encode(get_server_data())
                 self.json_obj = get_server_data()
-                # self.json_obj = json.JSONEncoder().encode(json_str)
-                self.json_mtime = time.time()
             except (urllib.error.URLError, socket.timeout) as e:
                 raise ServerStatusError('failed to retrieve server data: ({})'.format(e))
             except ValueError as e:
                 raise ServerStatusError('failed to parse retrieved server data: ({})'.format(e))
 
-        try:
-            # Remove servers that have not synced, and parse the "last_sync" times for
-            # comparison later.
-            mirrors = json_str
-            # Filter incomplete mirrors  and mirrors that haven't synced.
-            # mirrors = list(
-            #     m for m in mirrors
-            #     if m['last_sync']
-            #     and m['completion_pct'] >= self.min_completion_pct
-            # )
-            # Parse 'last_sync' times for future comparison.
-            # for mirror in mirrors:
-            #     mirror['last_sync'] = calendar.timegm(
-            #         time.strptime(mirror['last_sync'],
-            #                       ServerStatus.PARSE_TIME_FORMAT)
-            #     )
-            # self.json_obj['urls'] = mirrors
-        except KeyError:
-            raise ServerStatusError(
-                'failed to parse retrieved mirror data (the format may have changed or there may be a transient error)')
-
-        if save_json and json_str:
-            try:
-                with open(cache_file, 'w') as f:
-                    f.write(json_str)
-            except IOError as e:
-                raise ServerStatusError('failed to cache JSON data ({})'.format(e))
-
     def get_obj(self):
         """Return the JSON object, retrieving new data if necessary."""
-        if not self.json_obj \
-                or time.time() > (self.json_mtime + self.refresh_interval):
+        if not self.json_obj:
             self.retrieve()
 
         return self.json_obj
 
     def get_servers(self):
-        return self.get_obj()['servers']
+        a = self.get_obj()
+        b = a['servers']
+        return b
 
     def filter(
             self,
@@ -297,7 +203,6 @@ class ServerStatus(object):
             countries=None,
             include=None,
             exclude=None,
-            age=None,
             protocols=None
     ):
         """Filter using different parameters."""
@@ -335,9 +240,6 @@ class ServerStatus(object):
                         break
                 if discard:
                     continue
-            # Filter by hours since last sync.
-            if age and t > (age * 60 ** 2 + server['last_sync']):
-                continue
 
             # Yield if we're still here.
             yield server
@@ -350,19 +252,12 @@ class ServerStatus(object):
         if not isinstance(servers, list):
             servers = list(servers)
 
-        if by == 'age':
-            servers.sort(key=lambda m: m['last_sync'], reverse=True)
-        elif by == 'rate':
+        if by == 'rate':
             servers = self.rate(servers)
-        elif by in ('country', 'country_code', 'delay', 'score'):
+        elif by in ('country', 'country_code'):
             servers.sort(key=lambda m: m[by])
         return servers
 
-    # Sort mirrors by download speed. Download speed will be calculated from the
-    # download time of the [core] database from each server.
-    # TODO: Consider ways to improve this.
-    # TODO: Consider the effects of threading (do the threads affect the results
-    #       by competing for bandwidth?)
     def rate(self, servers=None, threads=5):
         if servers is None:
             servers = self.get_servers()
@@ -392,52 +287,8 @@ class ServerStatus(object):
         def worker():
             while True:
                 url = q_in.get()
-
-                db_subpath = 'core/os/x86_64/core.db'
-                db_url = url + db_subpath
-                scheme = urllib.parse.urlparse(url).scheme
-                # Leave the rate as 0 if the connection fails.
-                # TODO: Consider more graceful error handling.
-                rate = 0
-                dt = float('NaN')
-
-                # urllib cannot handle rsync protocol
-
-                # TODO: replace with ping
-                if scheme == 'rsync':
-                    rsync_cmd = [
-                        'rsync',
-                        '-avL', '--no-h', '--no-motd',
-                        '--contimeout={}'.format(self.connection_timeout),
-                        db_url
-                    ]
-                    try:
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            t0 = time.time()
-                            subprocess.check_call(
-                                rsync_cmd + [tmpdir],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL
-                            )
-                            dt = time.time() - t0
-                            size = os.path.getsize(os.path.join(
-                                tmpdir,
-                                os.path.basename(db_subpath)
-                            ))
-                            rate = size / dt
-                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-                        pass
-                else:
-                    req = urllib.request.Request(url=db_url)
-                    try:
-                        t0 = time.time()
-                        with urllib.request.urlopen(req, None, self.connection_timeout) as f:
-                            size = len(f.read())
-                            dt = time.time() - t0
-                            rate = size / (dt)
-                    except (OSError, urllib.error.HTTPError, http.client.HTTPException):
-                        pass
-                q_out.put((url, rate, dt))
+                rate = ping(url)
+                q_out.put((url, rate))
                 q_in.task_done()
 
         # Launch threads
@@ -449,34 +300,33 @@ class ServerStatus(object):
         # Load the input queue.Queue
         url_len = max(len(m['url']) for m in servers)
         for server in servers:
-            logging.info("rating {}".format(server['url']))
+            logging.info("pinging {}".format(server['url']))
             q_in.put(server['url'])
 
         q_in.join()
 
         # Get the results
-        # The "in mirrors" loop is just used to ensure that the right number of
+        # The "in servers" loop is just used to ensure that the right number of
         # items is retrieved.
 
         # Display some extra data.
-        header_fmt = '{{:{:d}s}}  {{:>14s}}  {{:>9s}}'.format(url_len)
-        logging.info(header_fmt.format('Server', 'Rate', 'Time'))
-        fmt = '{{:{:d}s}}  {{:8.2f}} KiB/s  {{:7.2f}} s'.format(url_len)
+        header_fmt = '{{:{:d}s}}  {{:>10s}}'.format(url_len)
+        logging.info(header_fmt.format('Server', 'Ping'))
+        fmt = '{{:{:d}s}}  {{:8.3f}} ms'.format(url_len)
 
-        # Loop over the mirrors just to ensure that we get the rate for each mirror.
-        # The value in the loop does not (necessarily) correspond to the mirror.
+        # Loop over the servers just to ensure that we get the rate for each server.
+        # The value in the loop does not (necessarily) correspond to the server.
         for _ in servers:
-            url, rate, dt = q_out.get()
-            kibps = rate / 1024.0
-            logging.info(fmt.format(url, kibps, dt))
+            url, rate = q_out.get()
+            logging.info(fmt.format(url, rate))
             rates[url] = rate
             q_out.task_done()
 
         # Sort by rate.
-        rated_mirrors = [m for m in servers if rates[m['url']] > 0]
-        rated_mirrors.sort(key=lambda m: rates[m['url']], reverse=True)
+        rated_servers = [m for m in servers if rates[m['url']] > 0]
+        rated_servers.sort(key=lambda m: rates[m['url']], reverse=False)
 
-        return rated_mirrors + [m for m in servers if rates[m['url']] == 0]
+        return rated_servers + [m for m in servers if rates[m['url']] == 0]
 
     def display_time(self, t=None):
         '''Format a time for display.'''
@@ -493,16 +343,16 @@ class ServerStatus(object):
 
         last_check = self.json_obj['last_check']
         # For some reason the "last_check" field included microseconds.
-        try:
-            parsed_last_check = datetime.datetime.strptime(
-                last_check,
-                self.PARSE_TIME_FORMAT_WITH_USEC,
-            ).timetuple()
-        except ValueError:
-            parsed_last_check = datetime.datetime.strptime(
-                last_check,
-                self.PARSE_TIME_FORMAT,
-            ).timetuple()
+        # try:
+        #     parsed_last_check = datetime.datetime.strptime(
+        #         last_check,
+        #         self.PARSE_TIME_FORMAT_WITH_USEC,
+        #     ).timetuple()
+        # except ValueError:
+        #     parsed_last_check = datetime.datetime.strptime(
+        #         last_check,
+        #         self.PARSE_TIME_FORMAT,
+        #     ).timetuple()
 
         width = 80
         colw = 11
@@ -515,20 +365,17 @@ class ServerStatus(object):
                              ('With:', cmd),
                              ('When:', self.display_time(time.gmtime())),
                              ('From:', ServerStatus.URL),
-                             ('Retrieved:', self.display_time(time.gmtime(self.json_mtime))),
-                             ('Last Check:', self.display_time(parsed_last_check)),
                          )
                      ) + \
                      '\n\n'
 
         country = None
 
-        # mirrors may be a generator so "if mirrors" will not work
-        no_mirrors = True
+        # servers may be a generator so "if servers" will not work
+        no_servers = True
         for server in servers:
-            no_mirrors = False
-            # Include country tags. This is intended for lists that are sorted by
-            # country.
+            no_servers = False
+            # Include country tags. This is intended for lists that are sorted by country.
             if include_country:
                 c = '{} [{}]'.format(server['country'], server['country_code'])
                 if c != country:
@@ -536,10 +383,10 @@ class ServerStatus(object):
                         serverlist += '\n'
                     serverlist += '# {}\n'.format(c)
                     country = c
-            # mirrorlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(mirror['url'], '$repo', '$arch')
-            serverlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(server['url'])
+            # serverlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(server['url'])
+            serverlist += server['url'] + "\n"
 
-        if no_mirrors:
+        if no_servers:
             return None
         else:
             return serverlist
@@ -585,8 +432,6 @@ def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
             print('{}'.format(m['url']))
             for k in ks:
                 v = m[k]
-                if k == 'last_sync':
-                    v = time.strftime(time_fmt, time.gmtime(v))
                 print(fmt.format(k, v))
             print()
 
@@ -595,17 +440,7 @@ def add_arguments(parser):
     '''
     Add arguments to the argument parser.
     '''
-    parser = argparse.ArgumentParser(description='retrieve and filter a list of the latest PrivateVPN servers')
-
-    parser.add_argument(
-        '--connection-timeout', type=int, metavar='n', default=5,
-        help='The number of seconds to wait before a connection times out.'
-    )
-
-    #   parser.add_argument(
-    #     '--download-timeout', type=int, metavar='n',
-    #     help='The number of seconds to wait before a download times out. The threshold is checked after each chunk is read, so the actual timeout may take longer.'
-    #   )
+    parser = argparse.ArgumentParser(description='retrieve and filter a list of the PrivateVPN servers')
 
     parser.add_argument(
         '--list-countries', action=ListCountries, nargs=0,
@@ -613,13 +448,8 @@ def add_arguments(parser):
     )
 
     parser.add_argument(
-        '--cache-timeout', type=int, metavar='n', default=300,
-        help='The cache timeout in seconds for the data retrieved from the Arch Linux Mirror Status API. The default is 300 (5 minutes).'
-    )
-
-    parser.add_argument(
         '--save', metavar='<filepath>',
-        help='Save the serverlist to the given path.'
+        help='Save the server-list to the given path.'
     )
 
     sort_help = '; '.join('"{}": {}'.format(k, v) for k, v in ServerStatus.SORT_TYPES.items())
@@ -645,13 +475,8 @@ def add_arguments(parser):
 
     filters = parser.add_argument_group(
         'filters',
-        'The following filters are inclusive, i.e. the returned list will only contain servers for which all of the given conditions are met.'
-    )
-
-    # not needed
-    filters.add_argument(
-        '-a', '--age', type=float, metavar='n',
-        help='Only return servers that have synchronized in the last n hours. n may be an integer or a decimal number.'
+        'The following filters are inclusive, i.e. the returned list will only '
+        'contain servers for which all of the given conditions are met.'
     )
 
     filters.add_argument(
@@ -675,35 +500,16 @@ def add_arguments(parser):
         help='Exclude servers that match <regex>, where <regex> is a Python regular express.'
     )
 
-    # not needed
-    filters.add_argument(
-        '-l', '--latest', type=int, metavar='n',
-        help='Limit the list to the n most recently synchronized servers.'
-    )
-
-    # not needed
-    filters.add_argument(
-        '--score', type=int, metavar='n',
-        help='Limit the list to the n servers with the highest score.'
-    )
-
     filters.add_argument(
         '-n', '--number', type=int, metavar='n',
         help='Return at most n servers.'
     )
 
     # not needed
-    filters.add_argument(
-        '-p', '--protocol', dest='protocols', action='append', metavar='<protocol>',
-        help='Match one of the given protocols, e.g. "http", "ftp".'
-    )
-
-    # not needed
-    filters.add_argument(
-        '--completion-percent', type=float, metavar='[0-100]', default=100.,
-        help='Set the minimum completion percent for the returned servers.'
-             ' Check the mirrorstatus webpage for the meaning of this parameter. Default value: %(default)s.'
-    )
+    # filters.add_argument(
+    #     '-p', '--protocol', dest='protocols', action='append', metavar='<protocol>',
+    #     help='Match one of the given protocols, e.g. "http", "ftp".'
+    # )
 
     return parser
 
@@ -713,7 +519,7 @@ def parse_args(args=None):
     Parse command-line arguments.
     '''
     parser = argparse.ArgumentParser(
-        description='retrieve and filter a list of the latest PrivateVPN servers'
+        description='retrieve and filter a list of the PrivateVPN servers'
     )
     parser = add_arguments(parser)
     options = parser.parse_args(args)
@@ -725,10 +531,6 @@ def process_options(options, ms=None, servers=None):
     if not ms:
         ms = ServerStatus(
             verbose=options.verbose,
-            connection_timeout=options.connection_timeout,
-            # download_timeout=options.download_timeout,
-            cache_timeout=options.cache_timeout,
-            min_completion_pct=(options.completion_percent / 100.),
             threads=options.threads
         )
 
@@ -740,18 +542,9 @@ def process_options(options, ms=None, servers=None):
         servers,
         countries=options.countries,
         include=options.include,
-        exclude=options.exclude,
-        age=options.age,
-        protocols=options.protocols
+        exclude=options.exclude
+        # protocols=options.protocols
     )
-
-    if options.latest and options.latest > 0:
-        servers = ms.sort(servers, by='age')
-        servers = servers[:options.latest]
-
-    if options.score and options.score > 0:
-        servers = ms.sort(servers, by='score')
-        servers = servers[:options.score]
 
     if options.fastest and options.fastest > 0:
         servers = ms.sort(servers, by='rate')
@@ -802,7 +595,7 @@ def main(args=None, configure_logging=False):
             if serverlist is None:
                 sys.exit('ERROR: No servers found')
     except ServerStatusError as e:
-        sys.exit('error: {}\n'.format(e.msg))
+        sys.exit('ERROR: {}\n'.format(e.msg))
 
     if options.save:
         try:
