@@ -18,11 +18,7 @@
 
 import argparse
 import datetime
-import errno
-import getpass
-import json
 import logging
-import os
 import pipes
 import queue
 import re
@@ -390,7 +386,7 @@ class ServerStatus(object):
 
 class ListCountries(argparse.Action):
     '''
-    Action to list countries along with the number of mirrors in each.
+    Action to list countries along with the number of servers in each.
     '''
 
     def __call__(self, parser, namespace, values, option_string=None):
@@ -406,7 +402,7 @@ class ListCountries(argparse.Action):
 
 def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
     '''
-    Print information about each mirror to STDOUT.
+    Print information about each server to STDOUT.
     '''
     if servers:
         if not isinstance(servers, list):
@@ -511,9 +507,6 @@ def add_arguments(parser):
 
 
 def parse_args(args=None):
-    '''
-    Parse command-line arguments.
-    '''
     parser = argparse.ArgumentParser(
         description='retrieve and filter a list of the PrivateVPN servers'
     )
@@ -576,6 +569,9 @@ def main(args=None, configure_logging=False):
         )
 
     try:
+        if options.ip:
+            print(get_ext_ip())
+            return
         ms, servers = process_options(options)
         if servers is not None and not isinstance(servers, list):
             servers = list(servers)
@@ -613,6 +609,6 @@ def run_main(args=None, **kwargs):
 if __name__ == "__main__":
     run_main(configure_logging=True)
 
-#TODO:
+# TODO:
 # test -i regex
 # test -x regex
