@@ -45,3 +45,6 @@ filters:
 ```
 
 Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
+
+Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API 
+ 
