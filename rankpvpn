@@ -77,6 +77,7 @@ def get_country_code(country):
             try:
                 country_code = pycountry.countries.get(official_name=country).alpha_2
             except KeyError:
+                # workaround for 'unknown' countries
                 if country == 'Russia':
                     country_code = "RU"
                 elif country == 'South Korea':
@@ -97,7 +98,7 @@ def get_server_list():
 
 
 def get_server_data():
-    # Debug:
+    # DEBUG:
     # soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
     sl = get_server_list()
     soup = BeautifulSoup(sl, "html.parser")
@@ -168,7 +169,7 @@ class ServerStatus(object):
         self.threads = threads
 
     def retrieve(self):
-        """Retrieve the current server status JSON data."""
+        # Retrieve the current server status JSON data.
         self.json_obj = None
 
         if not self.json_obj:
@@ -180,7 +181,7 @@ class ServerStatus(object):
                 raise ServerStatusError('failed to parse retrieved server data: ({})'.format(e))
 
     def get_obj(self):
-        """Return the JSON object, retrieving new data if necessary."""
+        # Return the JSON object, retrieving new data if necessary.
         if not self.json_obj:
             self.retrieve()
 
@@ -238,7 +239,7 @@ class ServerStatus(object):
             yield server
 
     def sort(self, servers=None, by=None):
-        """Sort using different parameters."""
+        # Sort using different parameters.
         if servers is None:
             servers = self.get_servers()
         # Ensure that "servers" is a list that can be sorted.
@@ -297,10 +298,6 @@ class ServerStatus(object):
 
         q_in.join()
 
-        # Get the results
-        # The "in servers" loop is just used to ensure that the right number of
-        # items is retrieved.
-
         # Display some extra data.
         url_len = max(len(m['url']) for m in servers)
         fmt = '{{:{:d}s}}  {{:8.3f}} ms'.format(url_len)
@@ -322,7 +319,7 @@ class ServerStatus(object):
         return rated_servers + [m for m in servers if rates[m['url']] == 0]
 
     def display_time(self, t=None):
-        '''Format a time for display.'''
+        # Format a time for display.
         return time.strftime(self.DISPLAY_TIME_FORMAT, t)
 
     def get_serverlist(self, servers=None, include_country=False, include_rate=False, cmd=None):
@@ -387,9 +384,7 @@ class ServerStatus(object):
 
 
 class ListCountries(argparse.Action):
-    '''
-    Action to list countries along with the number of servers in each.
-    '''
+    # Action to list countries along with the number of servers in each.
 
     def __call__(self, parser, namespace, values, option_string=None):
         ms = ServerStatus()
@@ -403,9 +398,7 @@ class ListCountries(argparse.Action):
 
 
 def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
-    '''
-    Print information about each server to STDOUT.
-    '''
+    # Print information about each server to STDOUT.
     if servers:
         if not isinstance(servers, list):
             servers = list(servers)
@@ -421,9 +414,6 @@ def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
 
 
 def add_arguments(parser):
-    '''
-    Add arguments to the argument parser.
-    '''
     parser = argparse.ArgumentParser(description='Retrieve and filter the list of PrivateVPN servers')
 
     parser.add_argument(
@@ -617,6 +607,3 @@ def run_main(args=None, **kwargs):
 
 if __name__ == "__main__":
     run_main(configure_logging=True)
-
-# TODO:
-# implement -r
