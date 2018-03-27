@@ -44,6 +44,10 @@ filters:
 
 ```
 
+Example: get the 5 fastest servers from your location:
+
+`./rankpvpn --sort rate -n 5 --verbose`
+
 Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
 
 Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API 
