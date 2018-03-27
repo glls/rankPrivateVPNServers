@@ -1,6 +1,6 @@
 # rankPrivateVPNServers
 
-List and rate the PrivateVPN servers
+List and rate the [PrivateVPN](https://privatevpn.com/) servers
 
 ```
 usage: rankpvpn [-h] [--list-countries] [--save <filepath>]
