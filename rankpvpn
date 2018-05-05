@@ -612,7 +612,3 @@ def run_main(args=None, **kwargs):
 
 if __name__ == "__main__":
     run_main(configure_logging=True)
-
-#TODO:
-# test -i regex
-# test -x regex
