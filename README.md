@@ -1,5 +1,7 @@
 # rankPrivateVPNServers
 
+List and rate the [PrivateVPN](https://privatevpn.com/) servers
+
 ```
 usage: rankpvpn [-h] [--list-countries] [--save <filepath>]
                 [--sort {rate,country}] [--threads n] [--verbose] [--info]
@@ -41,3 +43,12 @@ filters:
   -r, --random          Choose a random server.
 
 ```
+
+Example: get the 5 fastest servers from your location:
+
+`./rankpvpn --sort rate -n 5 --verbose`
+
+Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
+
+Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API 
+ 

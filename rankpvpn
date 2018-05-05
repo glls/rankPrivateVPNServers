@@ -18,11 +18,7 @@
 
 import argparse
 import datetime
-import errno
-import getpass
-import json
 import logging
-import os
 import pipes
 import queue
 import re
@@ -81,6 +77,7 @@ def get_country_code(country):
             try:
                 country_code = pycountry.countries.get(official_name=country).alpha_2
             except KeyError:
+                # workaround for 'unknown' countries
                 if country == 'Russia':
                     country_code = "RU"
                 elif country == 'South Korea':
@@ -101,7 +98,7 @@ def get_server_list():
 
 
 def get_server_data():
-    # Debug:
+    # DEBUG:
     # soup = BeautifulSoup(open('serverlist.htm', 'r'), "html.parser")
     sl = get_server_list()
     soup = BeautifulSoup(sl, "html.parser")
@@ -122,7 +119,7 @@ def get_server_data():
 
             data.append({
                 'country': country,
-                "country_code": get_country_code(country),
+                'country_code': get_country_code(country),
                 'city': city,
                 'url': tds[1].text.replace("\n", "").strip(),
                 'port_tap': tds[2].text.replace("\n", "").strip(),
@@ -147,8 +144,6 @@ class ServerStatus(object):
 
     # Server list table format
     # Country	Server address	Port OpenVPN-TAP-UDP	OpenVPN-TUN-UDP/TCP	Socks5 Proxy	HTTP Proxy
-    MIRROR_URL_FORMAT = '{0}'
-    MIRRORLIST_ENTRY_FORMAT = MIRROR_URL_FORMAT + "\n"
     DISPLAY_TIME_FORMAT = '%Y-%m-%d %H:%M:%S UTC'
     PARSE_TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
     # Required for the last_check field, which oddly includes microseconds.
@@ -174,7 +169,7 @@ class ServerStatus(object):
         self.threads = threads
 
     def retrieve(self):
-        """Retrieve the current server status JSON data."""
+        # Retrieve the current server status JSON data.
         self.json_obj = None
 
         if not self.json_obj:
@@ -186,7 +181,7 @@ class ServerStatus(object):
                 raise ServerStatusError('failed to parse retrieved server data: ({})'.format(e))
 
     def get_obj(self):
-        """Return the JSON object, retrieving new data if necessary."""
+        # Return the JSON object, retrieving new data if necessary.
         if not self.json_obj:
             self.retrieve()
 
@@ -225,7 +220,6 @@ class ServerStatus(object):
             if protocols and not server['protocol'] in protocols:
                 continue
             # Filter by regex.
-            # TODO: Find a better way to do this.
             if include:
                 for regex in include:
                     if re.search(regex, server['url']):
@@ -245,7 +239,7 @@ class ServerStatus(object):
             yield server
 
     def sort(self, servers=None, by=None):
-        """Sort using different parameters."""
+        # Sort using different parameters.
         if servers is None:
             servers = self.get_servers()
         # Ensure that "servers" is a list that can be sorted.
@@ -298,20 +292,14 @@ class ServerStatus(object):
             t.start()
 
         # Load the input queue.Queue
-        url_len = max(len(m['url']) for m in servers)
         for server in servers:
             logging.info("pinging {}".format(server['url']))
             q_in.put(server['url'])
 
         q_in.join()
 
-        # Get the results
-        # The "in servers" loop is just used to ensure that the right number of
-        # items is retrieved.
-
         # Display some extra data.
-        header_fmt = '{{:{:d}s}}  {{:>10s}}'.format(url_len)
-        logging.info(header_fmt.format('Server', 'Ping'))
+        url_len = max(len(m['url']) for m in servers)
         fmt = '{{:{:d}s}}  {{:8.3f}} ms'.format(url_len)
 
         # Loop over the servers just to ensure that we get the rate for each server.
@@ -322,17 +310,19 @@ class ServerStatus(object):
             rates[url] = rate
             q_out.task_done()
 
-        # Sort by rate.
+        # Sort by rate
+        for m in servers:
+            m['rate'] = rates[m['url']]
         rated_servers = [m for m in servers if rates[m['url']] > 0]
         rated_servers.sort(key=lambda m: rates[m['url']], reverse=False)
 
         return rated_servers + [m for m in servers if rates[m['url']] == 0]
 
     def display_time(self, t=None):
-        '''Format a time for display.'''
+        # Format a time for display.
         return time.strftime(self.DISPLAY_TIME_FORMAT, t)
 
-    def get_serverlist(self, servers=None, include_country=False, cmd=None):
+    def get_serverlist(self, servers=None, include_country=False, include_rate=False, cmd=None):
         if servers is None:
             servers = self.get_servers()
         if cmd is None:
@@ -359,6 +349,7 @@ class ServerStatus(object):
 
         # servers may be a generator so "if servers" will not work
         no_servers = True
+        url_len = max(len(m['url']) for m in servers)
         for server in servers:
             no_servers = False
             # Include country tags. This is intended for lists that are sorted by country.
@@ -369,8 +360,12 @@ class ServerStatus(object):
                         serverlist += '\n'
                     serverlist += '# {}\n'.format(c)
                     country = c
-            # serverlist += ServerStatus.MIRRORLIST_ENTRY_FORMAT.format(server['url'])
-            serverlist += server['url'] + "\n"
+
+            if include_rate:
+                fmt = '{{:{:d}s}}  {{:8.3f}} ms\n'.format(url_len)
+                serverlist += fmt.format(server['url'], server['rate'])
+            else:
+                serverlist += server['url'] + '\n'
 
         if no_servers:
             return None
@@ -389,9 +384,7 @@ class ServerStatus(object):
 
 
 class ListCountries(argparse.Action):
-    '''
-    Action to list countries along with the number of mirrors in each.
-    '''
+    # Action to list countries along with the number of servers in each.
 
     def __call__(self, parser, namespace, values, option_string=None):
         ms = ServerStatus()
@@ -404,10 +397,8 @@ class ListCountries(argparse.Action):
         sys.exit(0)
 
 
-def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
-    '''
-    Print information about each mirror to STDOUT.
-    '''
+def print_server_info(servers):
+    # Print information about each server to STDOUT.
     if servers:
         if not isinstance(servers, list):
             servers = list(servers)
@@ -423,9 +414,6 @@ def print_server_info(servers, time_fmt=ServerStatus.DISPLAY_TIME_FORMAT):
 
 
 def add_arguments(parser):
-    '''
-    Add arguments to the argument parser.
-    '''
     parser = argparse.ArgumentParser(description='Retrieve and filter the list of PrivateVPN servers')
 
     parser.add_argument(
@@ -472,7 +460,8 @@ def add_arguments(parser):
 
     filters.add_argument(
         '-c', '--country', dest='countries', action='append', metavar='<country>',
-        help='Match one of the given countries (case-sensitive). Use "--list-countries" to see which are available.'
+        help='Match one of the given countries (case-sensitive).'
+             ' Use "--list-countries" to see which are available.'
     )
 
     filters.add_argument(
@@ -511,18 +500,14 @@ def add_arguments(parser):
 
 
 def parse_args(args=None):
-    '''
-    Parse command-line arguments.
-    '''
     parser = argparse.ArgumentParser(
-        description='retrieve and filter a list of the PrivateVPN servers'
+        description='Retrieve and filter a list of the PrivateVPN servers'
     )
     parser = add_arguments(parser)
     options = parser.parse_args(args)
     return options
 
 
-# Process options
 def process_options(options, ms=None, servers=None):
     if not ms:
         ms = ServerStatus(
@@ -552,6 +537,12 @@ def process_options(options, ms=None, servers=None):
     if options.number:
         servers = list(servers)[:options.number]
 
+    if options.random:
+        from random import shuffle
+        a = list(servers)
+        shuffle(a)
+        servers = a
+
     return ms, servers
 
 
@@ -576,18 +567,26 @@ def main(args=None, configure_logging=False):
         )
 
     try:
+        if options.ip:
+            print(get_ext_ip())
+            return
         ms, servers = process_options(options)
         if servers is not None and not isinstance(servers, list):
             servers = list(servers)
         if not servers:
             sys.exit('ERROR: No servers found')
         include_country = options.sort == 'country'
+        include_rate = options.sort == 'rate' or options.fastest
         # Convert the generator object to a list for re-use later.
         if options.info:
             print_server_info(servers)
             return
         else:
-            serverlist = ms.get_serverlist(servers, include_country=include_country, cmd=cmd)
+            serverlist = ms.get_serverlist(
+                servers,
+                include_country=include_country,
+                include_rate=include_rate,
+                cmd=cmd)
             if serverlist is None:
                 sys.exit('ERROR: No servers found')
     except ServerStatusError as e:
