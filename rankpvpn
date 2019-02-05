@@ -70,13 +70,13 @@ def get_ext_ip():
 def get_country_code(country):
     try:
         country_code = pycountry.countries.get(name=country).alpha_2
-    except KeyError:
+    except (KeyError, AttributeError):
         try:
             country_code = pycountry.countries.get(common_name=country).alpha_2
-        except KeyError:
+        except (KeyError, AttributeError):
             try:
                 country_code = pycountry.countries.get(official_name=country).alpha_2
-            except KeyError:
+            except (KeyError, AttributeError):
                 # workaround for 'unknown' countries
                 if country == 'Russia':
                     country_code = "RU"

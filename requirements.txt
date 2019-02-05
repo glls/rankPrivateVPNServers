@@ -1,2 +1,2 @@
-beautifulsoup4==4.6.0
-pycountry==18.2.23
+beautifulsoup4==4.7.1
+pycountry==18.12.8
