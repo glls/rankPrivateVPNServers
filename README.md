@@ -50,5 +50,6 @@ Example: get the 5 fastest servers from your location:
 
 Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
 
-Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API 
+Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API. 
  
+PrivateVPN added openVPN config files for importing, download [here](https://privatevpn.com/support/getting-started/miscellaneous/openvpn/openvpn-configurations-files). 
