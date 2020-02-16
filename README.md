@@ -65,6 +65,8 @@ md-chi.pvdata.host    49.000 ms
 lu-ste.pvdata.host    52.000 ms
 ```
 
+## Credits 
+
 Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
 
 Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API. 
