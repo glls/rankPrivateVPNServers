@@ -45,18 +45,21 @@ class ServerStatusError(Exception):
 # return round-trip avg ms
 def ping(ip, cnt=3, wait=0.3):
     ret = 0.0
-    pr = Popen(('ping', '-c' + str(cnt), '-i' + str(wait), ip),
-               stdout=PIPE, stderr=STDOUT)
+    if sys.platform == "win32":
+        outBytes='bytes='
+        pr = Popen(('ping', '-n', str(cnt), ip), stdout=PIPE, stderr=STDOUT)
+    else:
+        outBytes='bytes from'
+        pr = Popen(('ping', '-c' + str(cnt), '-i' + str(wait), ip), stdout=PIPE, stderr=STDOUT)
 
     out = str(pr.communicate()[0])
-    if 'bytes from' in out:
-        # linux
+    if outBytes in out:
         if sys.platform == "linux" or sys.platform == "linux2":
             ret = float(re.search(r'min/avg/max/mdev = [\d.]+/([\d.]+)', out).groups()[0])
         elif sys.platform == "darwin":
             ret = float(re.search(r'min/avg/max/stddev = [\d.]+/([\d.]+)', out).groups()[0])
         elif sys.platform == "win32":
-            ret = float(re.search(r'min/avg/max/stddev = [\d.]+/([\d.]+)', out).groups()[0])
+            ret = float(re.search(r'Average = ([\d]+)ms', out).groups()[0])
     return ret
 
 
@@ -143,7 +146,7 @@ class ServerStatus(object):
     URL = 'https://privatevpn.com/serverlist'
 
     # Server list table format
-    # Country	Server address	Port OpenVPN-TAP-UDP	OpenVPN-TUN-UDP/TCP	Socks5 Proxy	HTTP Proxy
+    # Country,Server address,Port OpenVPN-TAP-UDP,OpenVPN-TUN-UDP/TCP,Socks5 Proxy,HTTP Proxy
     DISPLAY_TIME_FORMAT = '%Y-%m-%d %H:%M:%S UTC'
     PARSE_TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
     # Required for the last_check field, which oddly includes microseconds.
