@@ -46,10 +46,27 @@ filters:
 
 Example: get the 5 fastest servers from your location:
 
-`./rankpvpn --sort rate -n 5 --verbose`
+`./rankpvpn --sort rate -n 5`
+
+Output:
+```
+################################################################################
+############################ PrivateVPN Server list ############################
+################################################################################
+
+# With:       rankpvpn --sort rate -n 5
+# When:       2020-02-16 20:10:08 UTC
+# From:       https://privatevpn.com/serverlist
+
+cy-nic.pvdata.host    38.000 ms
+ro-buk.pvdata.host    40.000 ms
+de-fra.pvdata.host    47.000 ms
+md-chi.pvdata.host    49.000 ms
+lu-ste.pvdata.host    52.000 ms
+```
 
 Based on [Reflector](https://xyne.archlinux.ca/projects/reflector/) from Archlinux, thanks Xyne!
 
 Thanks to [ipify](https://www.ipify.org/) for the efficient Public IP Address API. 
  
-PrivateVPN added openVPN config files for importing, download [here](https://privatevpn.com/support/getting-started/miscellaneous/openvpn/openvpn-configurations-files). 
+PrivateVPN added openVPN config files for importing, download them [here](https://privatevpn.com/support/getting-started/miscellaneous/openvpn/openvpn-configurations-files). 
