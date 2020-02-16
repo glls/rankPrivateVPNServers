@@ -490,7 +490,7 @@ def add_arguments(parser):
 
     filters.add_argument(
         '-r', '--random', action='store_true',
-        help='Choose a random server.'
+        help='Shuffle the resulting server list.'
     )
 
     # not needed
